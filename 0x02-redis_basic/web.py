@@ -1,55 +1,41 @@
 #!/usr/bin/env python3
 """
-Implementation of an expiring web cache and tracker.
+Implementation of a get_page function using requests and Redis for caching.
 """
 
 import redis
 import requests
-from typing import Callable
 from functools import wraps
 
-redis_client = redis.Redis()
+r = redis.Redis()
 
 
-def wrap_requests(fn: Callable) -> Callable:
-    """Decorator that adds caching to the wrapped function.
+def url_access_count(method):
+    """Decorator to cache and count URL accesses."""
+    @wraps(method)
+    def wrapper(url):
+        """Wrapper function for caching and counting."""
+        key = "cached:" + url
+        cached_value = r.get(key)
+        if cached_value:
+            return cached_value.decode("utf-8")
 
-    Args:
-        fn: The function to be wrapped.
+        key_count = "count:" + url
+        html_content = method(url)
 
-    Returns:
-        The wrapped function.
-    """
-
-    @wraps(fn)
-    def wrapper(url: str) -> str:
-        """Wrapper function with caching logic.
-
-        Args:
-            url: The URL to fetch page content from.
-
-        Returns:
-            The HTML content of the page.
-        """
-        redis_client.incr(f"count:{url}")
-        cached_response = redis_client.get(f"cached:{url}")
-        if cached_response:
-            return cached_response.decode('utf-8')
-        result = fn(url)
-        redis_client.setex(f"cached:{url}", 10, result)
-        return result
+        r.incr(key_count)
+        r.set(key, html_content, ex=10)
+        r.expire(key, 10)
+        return html_content
     return wrapper
 
 
-@wrap_requests
+@url_access_count
 def get_page(url: str) -> str:
-    """Fetches the HTML content of a web page.
+    """Fetches HTML content of a URL."""
+    results = requests.get(url)
+    return results.text
 
-    Args:
-        url: The URL of the web page.
 
-    Returns:
-        The HTML content of the web page.
-    """
-    response = requests.get(url)
-    return response.text
+if __name__ == "__main__":
+    get_page('http://slowwly.robertomurray.co.uk')
